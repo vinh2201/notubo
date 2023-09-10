@@ -1,10 +1,10 @@
 @echo off
-TITLE Windows 10 22H2 slim down and integrate updates
+TITLE Windows 10 22H2/LTSC2021 slim down and integrate updates
 CLS
 
 ::
 :: Author: Wojciech Keller
-:: Version: 1.41
+:: Version: 1.60
 :: License: free
 ::
 
@@ -12,8 +12,8 @@ CLS
 :: -------------- Start of Configuration Section --------------------------------------------------------------
 :: ============================================================================================================
 
-:: Download and integrate updates up to April 2023
- set IntegrateUpdates=0
+:: Download and integrate updates up to August 2023
+ set IntegrateUpdates=1
 
   :: - Set default NTP time server instead of time.windows.com
    set NTPserver=pool.ntp.org
@@ -25,6 +25,18 @@ CLS
   :: - Disable search indexing.
   ::   It is recommended to disable it on systems installed on hard drives or other low resource computers.
    set DisableSearchIndexing=0
+
+  :: Disable Windows Search UWP application entirely from task bar
+  ::   It is recommended for ClassicShell/OpenShell users
+   set DisableWindowsSearch=1
+
+  :: Replaces default Start Menu UWP application with OpenShell Start Menu
+  ::  Note: ReplaceStartMenuWithOpenShell=1 also implies DisableWindowsSearch=1
+   set ReplaceStartMenuWithOpenShell=1
+
+    :: If ReplaceStartMenuWithOpenShell is enabled, 
+    :: then Start Menu and Task Bar will look like those of Windows 7 Aero.
+     set OpenShellLooksLikeWin7=1
 
   :: - Disable automatic update of root certificates that are used for encrypted connections.
   ::   The setting implies offline update of root certifcates during installation
@@ -41,12 +53,16 @@ CLS
 
   ::  - Disable Prefetch and Superfetch 
   ::    May be useful for fast SSD drives or for systems with low RAM memory.
-   set DisablePrefetcher=1
+   set DisablePrefetcher=0
 
   :: - 1 = Disable AutoPlay for all devices inlcuding CD/DVD media
   :: - 0 = Enable autoplay for CD/DVD media only, but disable for the rest for security.
   ::       AutoPlay has been one of the main sources of spreading of viruses in the past.
    set DisableCDAutoPlay=1
+
+  :: - 1 = Disable Performance Counters
+  :: - 0 = Leave Performance Counters Enabled
+   set DisablePerfCounters=1
 
 
   :: Disable Windows Defender builtin antivirus
@@ -54,11 +70,11 @@ CLS
   ::  1 - disable real time protection and automatic scheduled scanning
   ::  2 - disable the above plus scheduled updates of virus definitions
   ::  3 - disable Windows Defender completely
-   set DisableDefender=0
+   set DisableDefender=3
 
   :: Disable Windows Defender MAPS/SpyNet - for better privacy, but with less security
-  :: Note: DisableDefender=3 also implies DisableSpyNet=1
-   set DisableSpyNet=0
+  ::  Note: DisableDefender=3 also implies DisableSpyNet=1
+   set DisableSpyNet=1
 
   :: Enable Windows Store
   ::  0 - disable Windows Store
@@ -68,13 +84,31 @@ CLS
   ::  4 - enable above + Push Notifications, Location and all permisions
    set EnableStore=0
 
+   :: Enable One Drive
+   :: 0 - disable
+   :: 1 - enable
+   set EnableOneDrive=0
 
   :: Add support for legacy HLP Help files
    set AddWinHlp=1
 
 
+  :: This option causes that created image will include Windows-RegulatedPackages (like Dolby Atmos surround-sound technology)
+  :: The option has only effect on Windows 10 Enterprise LTSC 2021 which lacks these packages by default.
+  :: The option has no effect on retail versions of Windows 10 (like Home, Pro, etc), because these packages are already included there.
+  ::
+  :: WARNING !!!
+  :: The option causes that the script will download so called Baseless Cumulative Packages that are really big (around 3 GB) !!!!
+   set IncludeWindowsRegulatedPackagesInLTSC=0
+
+
+  :: Type here comma separated services you want to disable (in addition to services designed to disable later in the script)
+  :: eg. set DisableAdditionalServices=service1,service2
+   set DisableAdditionalServices=TrkWks
+
+
 :: Split install.wim if its size exceeds 4 GB so it fits to FAT32 pen drive
- set SplitInstallWim=0
+ set SplitInstallWim=1
 
 :: Create ISO image or leave installer files in DVD folder
  set CreateISO=1
@@ -163,7 +197,7 @@ if "%ISOName%"=="" (
   ECHO ========================================================================
   ECHO ISO/DVD File not found in main script directory!
   ECHO.
-  ECHO Please copy Windows 10 22H2 ISO DVD to the same location as Slimdown10
+  ECHO Please copy Windows 10 22H2/LTSC2021 ISO DVD to the same location as Slimdown10
   ECHO ========================================================================
   ECHO.
   PAUSE >NUL
@@ -294,6 +328,98 @@ SET ImageCount=
 
 :skipSelectImage
 
+REM Check Enterprise LTSC
+set IsLTSC=0
+"%DISM%" /English /Get-WimInfo /WimFile:"%~dp0DVD\sources\install.wim" /Index:1 | findstr /l /i /c:"Name :" | findstr /l /c:"LTSC" >nul 2>&1 && set IsLTSC=1
+
+
+if "%IntegrateUpdates%"=="0" goto skipUpdates1
+
+ECHO.
+ECHO.
+ECHO ================================================================
+ECHO Downloading missing Windows 10 22H2/LTSC2021 Updates...
+ECHO ================================================================
+ECHO.
+
+
+type "%~dp0hotfixes\hfixes_all.txt" | find /i "%ImageArchitecture%" > "%~dp0hotfixes\hfixes_%ImageArchitecture%.txt"
+cd /d "%~dp0hotfixes"
+FOR /F "eol=; tokens=1,2*" %%i in (hfixes_%ImageArchitecture%.txt) do if not exist "%~dp0hotfixes\%%i" echo Downloading: "%%i" & "%~dp0tools\%HostArchitecture%\wget.exe" -q --show-progress --no-hsts --no-check-certificate -O "%%i" "%%j"
+
+if not "%IsLTSC%"=="0" (
+
+ type "%~dp0hotfixes\hfixes_ltsc.txt" | find /i "ssu-" | find /i "%ImageArchitecture%" > "%~dp0hotfixes\hfixes_%ImageArchitecture%.txt"
+ FOR /F "eol=; tokens=1,2*" %%i in (hfixes_%ImageArchitecture%.txt) do if not exist "%~dp0hotfixes\%%i" echo Downloading: "%%i" & "%~dp0tools\%HostArchitecture%\wget.exe" -q --show-progress --no-hsts --no-check-certificate -O "%%i" "%%j"
+
+ if not "%IncludeWindowsRegulatedPackagesInLTSC%"=="0" (
+  type "%~dp0hotfixes\hfixes_ltsc.txt" | find /i "Microsoft-Windows-RegulatedPackages-" | find /i "%ImageArchitecture%" > "%~dp0hotfixes\hfixes_%ImageArchitecture%.txt"
+  FOR /F "eol=; tokens=1,2*" %%i in (hfixes_%ImageArchitecture%.txt) do if not exist "%~dp0hotfixes\%%i" echo Downloading: "%%i" & "%~dp0tools\%HostArchitecture%\wget.exe" -q --show-progress --no-hsts --no-check-certificate -O "%%i" "%%j"
+  type "%~dp0hotfixes\hfixes_ltsc.txt" | find /i "microsoft-windows-client-languagepack-package" | find /i "%ImageArchitecture%" | find /i "%ImageLanguage%" > "%~dp0hotfixes\hfixes_%ImageArchitecture%.txt"
+  FOR /F "eol=; tokens=1,2*" %%i in (hfixes_%ImageArchitecture%.txt) do if not exist "%~dp0hotfixes\%%i" echo Downloading: "%%i" & "%~dp0tools\%HostArchitecture%\wget.exe" -q --show-progress --no-hsts --no-check-certificate -O "%%i" "%%j"
+  type "%~dp0hotfixes\hfixes_ltsc.txt" | find /i "-baseless" | find /i "%ImageArchitecture%" > "%~dp0hotfixes\hfixes_%ImageArchitecture%.txt"
+  FOR /F "eol=; tokens=1,2*" %%i in (hfixes_%ImageArchitecture%.txt) do if not exist "%~dp0hotfixes\%%i" echo Downloading: "%%i" & "%~dp0tools\%HostArchitecture%\wget.exe" -q --show-progress --no-hsts --no-check-certificate -O "%%i" "%%j"
+ )
+
+)
+
+REM Restore Title Bar changed by wget
+TITLE Windows 10 22H2/LTSC2021 slim down and integrate updates
+
+del /q /f "%~dp0hotfixes\hfixes_%ImageArchitecture%.txt" >nul 2>&1
+
+ECHO.
+ECHO Done.
+ECHO.
+
+
+set DownloadErr=0
+set MinSize=102400
+
+FOR %%f in (*.msu) do (
+ if %%~zf lss %MinSize% (
+  del /q /f "%%f" >nul 2>&1
+  echo WARNING! Removed incorrectly downloaded file: "%%f"
+  set DownloadErr=1
+ )
+)
+FOR %%f in (*.esd) do (
+ if %%~zf lss %MinSize% (
+  del /q /f "%%f" >nul 2>&1
+  echo WARNING! Removed incorrectly downloaded file: "%%f"
+  set DownloadErr=1
+ )
+)
+FOR %%f in (*.cab) do (
+ if %%~zf lss %MinSize% (
+  del /q /f "%%f" >nul 2>&1
+  echo WARNING! Removed incorrectly downloaded file: "%%f"
+  set DownloadErr=1
+ )
+)
+FOR %%f in (*.psf) do (
+ if %%~zf lss %MinSize% (
+  del /q /f "%%f" >nul 2>&1
+  echo WARNING! Removed incorrectly downloaded file: "%%f"
+  set DownloadErr=1
+ )
+)
+
+cd /d "%~dp0"
+
+if not "%DownloadErr%"=="0" (
+ ECHO.
+ ECHO.
+ ECHO.
+ ECHO ERROR!
+ ECHO  Some files has NOT been downloaded correctly!
+ ECHO  Please re-run the script to try again!
+ ECHO.
+ PAUSE >NUL
+ goto end
+)
+
+:skipUpdates1
 
 REM Copy additional scripts to DVD for manual run
 xcopy "%~dp0ExtraScripts\*" "%~dp0DVD\ExtraScripts\" /e /s /y >nul 2>&1
@@ -341,6 +467,14 @@ if "%InternalDISM%"=="0" goto skipAPPXfromSetupComplete
  echo :skipAPPX>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
 :skipAPPXfromSetupComplete
 
+if not exist "%~dp0hotfixes\APPX\HEVC\Microsoft.HEVCVideoExtension*%ImageArchitecture%*.appx" goto skipHEVCupd
+ mkdir "%~dp0DVD\Updates\HEVC" >nul 2>&1
+ copy /b /y "%~dp0hotfixes\APPX\HEVC\Microsoft.HEVCVideoExtension*%ImageArchitecture%*.appx" "%~dp0DVD\Updates\HEVC" >nul 2>&1
+ echo if "%%CDROM%%"=="" goto skipHEVC>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
+ echo dism /Online /Add-ProvisionedAppxPackage /PackagePath:"%%CDROM%%\Updates\HEVC\Microsoft.HEVCVideoExtension_2.0.61931.0_%ImageArchitecture%__8wekyb3d8bbwe.appx" /SkipLicense>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
+ echo :skipHEVC>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
+:skipHEVCupd
+
 if not exist "%~dp0hotfixes\directx_Jun2010_redist.exe" goto skipDX9int
  echo if "%%CDROM%%"=="" goto skipDX9>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
  echo start /w "" "%%CDROM%%\Updates\DX9\DXSETUP.exe" /silent>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
@@ -362,30 +496,26 @@ if not exist "%~dp0hotfixes\directx_Jun2010_redist.exe" goto skipDX9int
 echo set CDROM=>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
 
 
-if "%IntegrateUpdates%"=="0" goto skipUpdates
+if "%IntegrateUpdates%"=="0" goto skipUpdates2
 
-ECHO.
-ECHO.
-ECHO ================================================================
-ECHO Downloading missing Windows 10 22H2 Updates...
-ECHO ================================================================
-ECHO.
+set KBnumLCU=
+set KBnumNetCU=
 
+cd /d %~dp0hotfixes"
+setlocal EnableDelayedExpansion
 
-type "%~dp0hotfixes\hfixes_all.txt" | find /i "%ImageArchitecture%" > "%~dp0hotfixes\hfixes_%ImageArchitecture%.txt"
-cd /d "%~dp0hotfixes"
-FOR /F "eol=; tokens=1,2*" %%i in (hfixes_%ImageArchitecture%.txt) do if not exist "%~dp0hotfixes\%%i" "%~dp0tools\%HostArchitecture%\wget.exe" -q --show-progress --no-hsts --no-check-certificate -O "%%i" "%%j"
+FOR /F "eol=; tokens=2 delims=-" %%a in (hfixes_all.txt) do (
+ if "!KBnumLCU!"=="" set "KBnumLCU=%%a"
+)
 
-REM Restore Title Bar changed by wget
-TITLE Windows 10 22H2 slim down and integrate updates
+set "KBnumNetCU=%KBnumLCU%"
 
+FOR /F "eol=; tokens=2 delims=-" %%a in (hfixes_all.txt) do (
+ if "!KBnumNetCU!"=="!KBnumLCU!" set "KBnumNetCU=%%a"
+)
+
+setlocal DisableDelayedExpansion
 cd /d "%~dp0"
-del /q /f "%~dp0hotfixes\hfixes_%ImageArchitecture%.txt" >nul 2>&1
-
-ECHO.
-ECHO Done.
-ECHO.
-
 
 ECHO.
 ECHO.
@@ -394,6 +524,15 @@ ECHO Integrating main updates to operating system...
 ECHO ================================================================
 ECHO.
 
+if not "%IsLTSC%"=="0" (
+ ECHO.
+ ECHO.
+ ECHO ================================================================================
+ ECHO Adding package KB5014032 - Servicing Stack Update 05/2022...
+ ECHO ================================================================================
+ ECHO.
+ "%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\ssu-19041.1704-%ImageArchitecture%.msu"
+)
 
 ECHO.
 ECHO.
@@ -406,20 +545,110 @@ ECHO.
 ECHO.
 ECHO.
 ECHO ================================================================================
-ECHO Adding package KB5025221 - April 2023 Cumulative...
+ECHO Adding package %KBnumLCU% - Cumulative Update...
 ECHO ================================================================================
 ECHO.
-"%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\windows10.0-kb5025221-%ImageArchitecture%.msu"
+"%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\windows10.0-%KBnumLCU%-%ImageArchitecture%.msu"
+
+if not "%IsLTSC%"=="0" (
+ if not "%IncludeWindowsRegulatedPackagesInLTSC%"=="0" (
+  ECHO.
+  ECHO.
+  ECHO ================================================================================
+  ECHO Unpacking Microsoft Windows Regulated Packages...
+  ECHO ================================================================================
+  ECHO.
+  
+  rd /s /q "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-Package-%ImageArchitecture%" >nul 2>&1
+  mkdir "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-Package-%ImageArchitecture%" >nul 2>&1
+  "%~dp0tools\%HostArchitecture%\7z.exe" x -y -bso0 -o"%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-Package-%ImageArchitecture%" "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-Package-%ImageArchitecture%.ESD"
+  
+  rd /s /q "%~dp0hotfixes\microsoft-windows-client-languagepack-package_%ImageLanguage%-%ImageArchitecture%" >nul 2>&1
+  mkdir "%~dp0hotfixes\microsoft-windows-client-languagepack-package_%ImageLanguage%-%ImageArchitecture%" >nul 2>&1
+  "%~dp0tools\%HostArchitecture%\7z.exe" x -y -bso0 -o"%~dp0hotfixes\microsoft-windows-client-languagepack-package_%ImageLanguage%-%ImageArchitecture%" "%~dp0hotfixes\microsoft-windows-client-languagepack-package_%ImageLanguage%-%ImageArchitecture%.esd"
+  
+  if "%ImageArchitecture%"=="x64" (
+   rd /s /q "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-WOW64-Package" >nul 2>&1
+   mkdir "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-WOW64-Package" >nul 2>&1
+   "%~dp0tools\%HostArchitecture%\7z.exe" x -y -bso0 -o"%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-WOW64-Package" "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-WOW64-Package-x64.ESD"
+  )
+
+  ECHO.
+  ECHO Done.
+
+  ECHO.
+  ECHO.
+  ECHO ================================================================================
+  ECHO Unpacking baseless package %KBnumLCU% - Cumulative Update...
+  ECHO ================================================================================
+  ECHO.
+  cd /d "%~dp0hotfixes"
+  rd /s /q "%~dp0hotfixes\Windows10.0-%KBnumLCU%-%ImageArchitecture%-baseless" >nul 2>&1
+  "%~dp0tools\%HostArchitecture%\PSFExtractor.exe" "Windows10.0-%KBnumLCU%-%ImageArchitecture%-baseless.cab"
+
+  ECHO.
+  ECHO.
+  ECHO ================================================================================
+  ECHO Adding Microsoft Windows RegulatedPackages - Dolby Atmos and others...
+  ECHO ================================================================================
+  ECHO.
+
+  cd /d "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-Package-%ImageArchitecture%"
+
+  for %%p in (Microsoft-Windows-RegulatedPackages-Package*~~*.mum) do (
+   "%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%%p"
+  )
+
+  if "%ImageArchitecture%"=="x64" (
+   cd /d "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-WOW64-Package"
+
+   for %%p in (Microsoft-Windows-RegulatedPackages-WOW64-Package*~~*.mum) do (
+    "%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%%p"
+   )
+  )
+
+  cd /d "%~dp0hotfixes\microsoft-windows-client-languagepack-package_%ImageLanguage%-%ImageArchitecture%"
+  
+  for %%p in (Microsoft-Windows-RegulatedPackages-Package*.mum) do (
+   "%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%%p"
+  )
+  
+  if "%ImageArchitecture%"=="x64" (
+   for %%p in (Microsoft-Windows-RegulatedPackages-WOW64-Package*.mum) do (
+    "%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%%p"
+   )
+  )
+
+  cd /d "%~dp0hotfixes\Windows10.0-%KBnumLCU%-%ImageArchitecture%-baseless"
+
+  for %%p in (Microsoft-Windows-RegulatedPackages-Package*~~*.mum) do (
+   "%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%%p"
+  )
+  for %%p in (Microsoft-Windows-RegulatedPackages-WOW64-Package*~~*.mum) do (
+   "%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%%p"
+  )
+  for %%p in (Microsoft-Windows-RegulatedPackages-Package*~%ImageLanguage%~*.mum) do (
+   "%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%%p"
+  )
+
+  cd /d "%~dp0"
+  rd /s /q "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-Package-%ImageArchitecture%" >nul 2>&1
+  rd /s /q "%~dp0hotfixes\microsoft-windows-client-languagepack-package_%ImageLanguage%-%ImageArchitecture%" >nul 2>&1
+  rd /s /q "%~dp0hotfixes\Microsoft-Windows-RegulatedPackages-WOW64-Package" >nul 2>&1
+  rd /s /q "%~dp0hotfixes\Windows10.0-%KBnumLCU%-%ImageArchitecture%-baseless" >nul 2>&1
+
+ )
+)
 
 ECHO.
 ECHO.
 ECHO ================================================================================
-ECHO Adding package KB5022502 - Cumulative Update for .NET Framework 3.5 and 4.8...
+ECHO Adding package %KBnumNetCU% - Cumulative Update for .NET Framework 3.5 and 4.8...
 ECHO ================================================================================
 ECHO.
-"%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\windows10.0-kb5022502-%ImageArchitecture%-ndp48.msu"
+"%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\windows10.0-%KBnumNetCU%-%ImageArchitecture%.msu"
 
-:skipUpdates
+:skipUpdates2
 
 
 ECHO.
@@ -456,6 +685,7 @@ for %%p in (%RemoveCapabilities%) do (
 :: Some services are also added to the list below in their appropriate subsections, eg. Windows Defender, File History etc.
 set "DisableServices=AJRouter"
 set "DisableServices=%DisableServices%,BcastDVRUserService"
+if "%EnableStore%"=="0" set "DisableServices=%DisableServices%,cbdhsvc"
 set "DisableServices=%DisableServices%,diagnosticshub.standardcollector.service"
 set "DisableServices=%DisableServices%,diagsvc"
 set "DisableServices=%DisableServices%,DiagTrack"
@@ -491,16 +721,21 @@ set "DisableServices=%DisableServices%,XblAuthManager"
 set "DisableServices=%DisableServices%,XblGameSave"
 set "DisableServices=%DisableServices%,XboxNetApiSvc"
 
+if not "%DisableAdditionalServices%"=="" set "DisableServices=%DisableServices%,%DisableAdditionalServices%"
+
 :: Remove the following tasks by default
 :: Some tasks are also added to the list below in their appropriate subsections, eg. Windows Defender, File History etc.
-set RemoveTasks="Application Experience\AitAgent","Application Experience\Microsoft Compatibility Appraiser","Application Experience\ProgramDataUpdater"
+set RemoveTasks="Application Experience\AitAgent","Application Experience\Microsoft Compatibility Appraiser","Application Experience\ProgramDataUpdater","Application Experience\StartupAppTask"
 set RemoveTasks=%RemoveTasks%,"AppListBackup\Backup"
 set RemoveTasks=%RemoveTasks%,"Autochk\Proxy"
 set RemoveTasks=%RemoveTasks%,"BrokerInfrastructure\BgTaskRegistrationMaintenanceTask"
+set RemoveTasks=%RemoveTasks%,"Chkdsk\ProactiveScan","Chkdsk\SyspartRepair"
 set RemoveTasks=%RemoveTasks%,"Customer Experience Improvement Program\Consolidator","Customer Experience Improvement Program\KernelCeipTask","Customer Experience Improvement Program\UsbCeip"
+set RemoveTasks=%RemoveTasks%,"Defrag\ScheduledDefrag"
 set RemoveTasks=%RemoveTasks%,"Device Information\Device","Device Information\Device User"
 set RemoveTasks=%RemoveTasks%,"DeviceDirectoryClient\HandleCommand","DeviceDirectoryClient\HandleWnsCommand","DeviceDirectoryClient\IntegrityCheck","DeviceDirectoryClient\LocateCommandUserSession","DeviceDirectoryClient\RegisterDeviceAccountChange","DeviceDirectoryClient\RegisterDeviceLocationRightsChange","DeviceDirectoryClient\RegisterDevicePeriodic24","DeviceDirectoryClient\RegisterDevicePolicyChange","DeviceDirectoryClient\RegisterDeviceProtectionStateChanged","DeviceDirectoryClient\RegisterDeviceSettingChange","DeviceDirectoryClient\RegisterUserDevice"
 set RemoveTasks=%RemoveTasks%,"Diagnosis\RecommendedTroubleshootingScanner","Diagnosis\Scheduled"
+set RemoveTasks=%RemoveTasks%,"DiskCleanup\SilentCleanup"
 set RemoveTasks=%RemoveTasks%,"DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector"
 set RemoveTasks=%RemoveTasks%,"DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector"
 set RemoveTasks=%RemoveTasks%,"DiskFootprint\Diagnostics"
@@ -512,21 +747,26 @@ set RemoveTasks=%RemoveTasks%,"HelloFace\FODCleanupTask"
 set RemoveTasks=%RemoveTasks%,"Input\LocalUserSyncDataAvailable","Input\MouseSyncDataAvailable","Input\PenSyncDataAvailable","Input\TouchpadSyncDataAvailable"
 set RemoveTasks=%RemoveTasks%,"InstallService\ScanForUpdates","InstallService\ScanForUpdatesAsUser","InstallService\SmartRetry","InstallService\WakeUpAndContinueUpdates","InstallService\WakeUpAndScanForUpdates"
 set RemoveTasks=%RemoveTasks%,"International\Synchronize Language Settings"
+set RemoveTasks=%RemoveTasks%,"Maintenance\WinSAT"
 set RemoveTasks=%RemoveTasks%,"Management\Autopilot\DetectHardwareChange","Management\Autopilot\RemediateHardwareChange"
 set RemoveTasks=%RemoveTasks%,"Management\Provisioning\Cellular","Management\Provisioning\Logon","Management\Provisioning\PostResetBoot","Management\Provisioning\Retry","Management\Provisioning\RunOnReboot"
 set RemoveTasks=%RemoveTasks%,"Maps\MapsToastTask","Maps\MapsUpdateTask"
 set RemoveTasks=%RemoveTasks%,"MemoryDiagnostic\ProcessMemoryDiagnosticEvents","MemoryDiagnostic\RunFullMemoryDiagnostic"
 set RemoveTasks=%RemoveTasks%,"Mobile Broadband Accounts\MNO Metadata Parser"
 set RemoveTasks=%RemoveTasks%,"NetTrace\GatherNetworkInfo"
+set RemoveTasks=%RemoveTasks%,"NlaSvc\WiFiTask"
 set RemoveTasks=%RemoveTasks%,"PI\Sqm-Tasks"
 set RemoveTasks=%RemoveTasks%,"Power Efficiency Diagnostics\AnalyzeSystem"
 set RemoveTasks=%RemoveTasks%,"PushToInstall\LoginCheck","PushToInstall\Registration"
+set RemoveTasks=%RemoveTasks%,"RecoveryEnvironment\VerifyWinRE"
 set RemoveTasks=%RemoveTasks%,"SettingSync\BackgroundUploadTask","SettingSync\BackupTask","SettingSync\NetworkStateChangeTask"
 set RemoveTasks=%RemoveTasks%,"Shell\FamilySafetyMonitor","Shell\FamilySafetyRefresh","Shell\FamilySafetyRefreshTask","Shell\ThemesSyncedImageDownload","Shell\UpdateUserPictureTask"
 set RemoveTasks=%RemoveTasks%,"UNP\RunUpdateNotificationMgr"
 set RemoveTasks=%RemoveTasks%,"Speech\SpeechModelDownloadTask"
 set RemoveTasks=%RemoveTasks%,"UpdateOrchestrator\Report policies","UpdateOrchestrator\Schedule Scan Static Task","UpdateOrchestrator\UpdateModelTask","UpdateOrchestrator\USO_UxBroker"
+set RemoveTasks=%RemoveTasks%,"UPnP\UPnPHostConfig"
 set RemoveTasks=%RemoveTasks%,"WaaSMedic\PerformRemediation"
+set RemoveTasks=%RemoveTasks%,"WCM\WiFiTask"
 set RemoveTasks=%RemoveTasks%,"WDI\ResolutionHost"
 set RemoveTasks=%RemoveTasks%,"Windows Error Reporting\QueueReporting"
 set RemoveTasks=%RemoveTasks%,"Windows Media Sharing\UpdateLibrary"
@@ -545,9 +785,6 @@ set DisableTrackers="AutoLogger-Diagtrack-Listener","Circular Kernel Context Log
 :: All user UWP applications listed in \Program Files\WindowsApps will be removed with the exception of the following list
 :: In other words: It is the list of UWP apps that you want to keep.
 set "IncludeUWPapps=Microsoft.VCLibs,Microsoft.NET.Native,Microsoft.HEIFImageExtension,Microsoft.VP9VideoExtensions,Microsoft.WebMediaExtensions,Microsoft.WebpImageExtension,Microsoft.HEVCVideoExtension"
-rem "Microsoft.Services.Store.Engagement"
-if "%EnableStore%"=="0" set "IncludeUWPapps=%IncludeUWPapps%,Microsoft.DesktopAppInstaller,Microsoft.UI.Xaml,Microsoft.WinJS,Microsoft.NET.Native.Framework,Microsoft.NET.Native.Runtime,Microsoft.Media.PlayReadyClient,Microsoft.ScreenSketch,microsoft.windowscommunicationsapps,Microsoft.Windows.Photos,Microsoft.MicrosoftStickyNotes,Microsoft.ZuneVideo,Microsoft.ZuneMusic,Microsoft.BingWeather,Microsoft.Todos"
-rem "Microsoft.Services.Store.Engagement"
 if not "%EnableStore%"=="0" set "IncludeUWPapps=%IncludeUWPapps%,Microsoft.UI.Xaml,Microsoft.WindowsStore,Microsoft.DesktopAppInstaller"
 rem "Microsoft.Services.Store.Engagement"
 if %EnableStore% GEQ 2 set "IncludeUWPapps=%IncludeUWPapps%,Microsoft.StorePurchaseApp"
@@ -559,18 +796,23 @@ set DisableSysUWPpermissions=
 
 :: By default disable most permisions for UWP apps
 if %EnableStore% LEQ 3 set "DisableUWPpermissions=activity,appDiagnostics,gazeInput,radios"
-if %EnableStore% LEQ 2 set "DisableUWPpermissions=%DisableUWPpermissions%,appointments,contacts,phoneCall,phoneCallHistory,sensors.custom"
-if %EnableStore% LEQ 1 set "DisableUWPpermissions=%DisableUWPpermissions%"
+if %EnableStore% LEQ 2 set "DisableUWPpermissions=%DisableUWPpermissions%,appointments,contacts,microphone,phoneCall,phoneCallHistory,sensors.custom,userDataTasks,webcam"
+if %EnableStore% LEQ 1 set "DisableUWPpermissions=%DisableUWPpermissions%,userAccountInformation"
 
 ::  By default remove all system UWP apps unless they are really necessary
 ::  Can be changed to minimal version  set "RemoveSystemUWPapps=Microsoft.MicrosoftEdge,Microsoft.MicrosoftEdgeDevToolsClient,Microsoft.Windows.ContentDeliveryManager"
-set "RemoveSystemUWPapps=Microsoft.AsyncTextService,Microsoft.ECApp,Microsoft.Windows.AddSuggestedFoldersToLibraryDialog,Microsoft.Windows.AppRep.ChxApp,Microsoft.Windows.AppResolverUX,,Microsoft.Windows.ContentDeliveryManager,Microsoft.Windows.OOBENetworkCaptivePortal,Microsoft.Windows.OOBENetworkConnectionFlow,Microsoft.Windows.PeopleExperienceHost,Microsoft.Windows.PinningConfirmationDialog,Microsoft.Windows.SecureAssessmentBrowser,Microsoft.XboxGameCallableUI"
-if "%EnableStore%"=="0" set "RemoveSystemUWPapps=%RemoveSystemUWPapps%"
+set "RemoveSystemUWPapps=Microsoft.AccountsControl,Microsoft.AsyncTextService,Microsoft.BioEnrollment,microsoft.creddialoghost,Microsoft.ECApp,Microsoft.LockApp,Microsoft.MicrosoftEdge,Microsoft.MicrosoftEdgeDevToolsClient,Microsoft.Windows.AddSuggestedFoldersToLibraryDialog,Microsoft.Windows.AppRep.ChxApp,Microsoft.Windows.AppResolverUX,Microsoft.Windows.AssignedAccessLockApp,Microsoft.Windows.CallingShellApp,Microsoft.Windows.CapturePicker,Microsoft.Windows.ContentDeliveryManager,microsoft.windows.narratorquickstart,Microsoft.Windows.OOBENetworkCaptivePortal,Microsoft.Windows.OOBENetworkConnectionFlow,Microsoft.Windows.PeopleExperienceHost,Microsoft.Windows.PinningConfirmationDialog,Microsoft.Windows.SecureAssessmentBrowser,Microsoft.XboxGameCallableUI,MicrosoftWindows.UndockedDevKit,NcsiUwpApp,ParentalControls,Windows.CBSPreview"
+if not "%ReplaceStartMenuWithOpenShell%"=="0" (
+ set DisableWindowsSearch=1
+ set "RemoveSystemUWPapps=%RemoveSystemUWPapps%,Microsoft.Windows.StartMenuExperienceHost"
+)
+if not "%DisableWindowsSearch%"=="0" set "RemoveSystemUWPapps=%RemoveSystemUWPapps%,Microsoft.Windows.Search"
+if "%EnableStore%"=="0" set "RemoveSystemUWPapps=%RemoveSystemUWPapps%,MicrosoftWindows.Client.CBS"
 
 ::  By default UWP apps are only removed from the Registry, leaving files on the disk
 ::  thus possibly preventing their reinstallations by futere Windows updates.
 ::  This setting causes system UWP apps to be also removed from the disk.
-set RemoveSystemUWPappsAlsoFromDisk=1
+set RemoveSystemUWPappsAlsoFromDisk=0
 
 
 
@@ -659,18 +901,18 @@ if "%IntegrateUpdates%"=="0" goto skipNETFXup
 ECHO.
 ECHO.
 ECHO ================================================================================
-ECHO Re-applying package KB5025221 - April 2023 Cumulative...
+ECHO Re-applying package %KBnumLCU% - Cumulative Update...
 ECHO ================================================================================
 ECHO.
-"%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\windows10.0-kb5025221-%ImageArchitecture%.msu"
+"%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\windows10.0-%KBnumLCU%-%ImageArchitecture%.msu"
 
 ECHO.
 ECHO.
 ECHO ================================================================================
-ECHO Re-applying package KB5022502 - Cumulative Update for .NET Framework 3.5 and 4.8...
+ECHO Re-applying package %KBnumNetCU% - Cumulative Update for .NET Framework 3.5 and 4.8...
 ECHO ================================================================================
 ECHO.
-"%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\windows10.0-kb5022502-%ImageArchitecture%-ndp48.msu"
+"%DISM%" /English /Add-Package /Image:"%~dp0mount" /PackagePath:"%~dp0hotfixes\windows10.0-%KBnumNetCU%-%ImageArchitecture%.msu"
 :skipNETFXup
 
 echo.
@@ -793,18 +1035,20 @@ reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\PCHealth\ErrorReporting" /v "DoRepo
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting" /v "Disabled" /t REG_DWORD /d 1 /f >nul
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting" /v "DontSendAdditionalData" /t REG_DWORD /d 1 /f >nul
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting" /v "LoggingDisabled" /t REG_DWORD /d 1 /f >nul
-REM AllowTelemetry = 1 means basic telemetry, 3 means full telemetry, 0 is inaccessible in non-enterprise Windows editions
-reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowTelemetry" /t REG_DWORD /d 1 /f > NUL
+reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowTelemetry" /t REG_DWORD /d 0 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowDeviceNameInTelemetry" /t REG_DWORD /d 0 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowDesktopAnalyticsProcessing" /t REG_DWORD /d 0 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowCommercialDataPipeline" /t REG_DWORD /d 0 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowUpdateComplianceProcessing" /t REG_DWORD /d 0 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowWUfBCloudProcessing" /t REG_DWORD /d 0 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "DoNotShowFeedbackNotifications" /t REG_DWORD /d 1 /f > NUL
+reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "DisableEnterpriseAuthProxy" /t REG_DWORD /d 1 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "DisableOneSettingsDownloads" /t REG_DWORD /d 1 /f > NUL
+reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\System\AllowTelemetry" /v "value" /t REG_DWORD /d "0" /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\PreviewBuilds" /v "AllowBuildPreview" /t REG_DWORD /d 0 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\PreviewBuilds" /v "EnableConfigFlighting" /t REG_DWORD /d 0 /f > NUL
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\PreviewBuilds" /v "EnableExperimentation" /t REG_DWORD /d 0 /f > NUL
+reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\current\Device\System" /v "AllowExperimentation" /t REG_DWORD /d "0" /f > NUL
 
 REM Disable Troubleshooting and Diagnostics
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Troubleshooting\AllowRecommendations" /v "TroubleshootingAllowRecommendations" /t REG_DWORD /d 0 /f >nul
@@ -831,8 +1075,10 @@ reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WDI\{ffc42108-4920-4acf-a4f
 
 REM Disable Cloud Content
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\PushToInstall" /v "DisablePushToInstall" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Personalization" /v "LockScreenOverlaysDisabled" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v "DisableWindowsSpotlightFeatures" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v "DisableCloudOptimizedContent" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v "DisableConsumerAccountStateContent" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v "DisableSoftLanding" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v "DisableWindowsConsumerFeatures" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v "DisableThirdPartySuggestions" /t REG_DWORD /d 1 /f >nul
@@ -894,6 +1140,11 @@ Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliver
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v "SubscribedContent-88000165Enabled" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v "SystemPaneSuggestionsEnabled" /t REG_DWORD /d 0 /f >nul
 
+REM By default remove all Start Menu tiles, except Windows Store (if enabled)
+copy /b /y "%~dp0hotfixes\DefaultLayouts.xml" "%~dp0mount\Users\Default\AppData\Local\Microsoft\Windows\Shell\DefaultLayouts.xml" >nul 2>&1
+if not "%IsLTSC%"=="0" (
+ copy /b /y "%~dp0hotfixes\LayoutModification.xml" "%~dp0mount\Users\Default\AppData\Local\Microsoft\Windows\Shell\LayoutModification.xml" >nul 2>&1
+)
 
 REM Setup Complete Script, Uninstall Edge, Disable NTFS last access time updates, re-apply power settings
 echo fsutil behavior set disableLastAccess ^1 ^>nul 2^>^&^1>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
@@ -925,6 +1176,14 @@ echo reg delete "HKLM\SOFTWARE\Microsoft\EdgeUpdate" /f ^>nul 2^>^&^1>>"%~dp0mou
 echo :skipEdgeUinstall>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
 echo set PF=>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
 echo set EdgeSetup=>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
+if not "%RemoveSystemUWPappsAlsoFromDisk%"=="0" echo rd /s /q "%%windir%%\SystemApps\Microsoft.AAD.BrokerPlugin_cw5n1h2txyewy">>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
+set OpenShellSetup=OpenShellSetup.exe
+for /f "delims=" %%i in ('dir /b /a-d "%~dp0hotfixes\OpenShellSetup*.exe" 2^>nul') do (set "OpenShellSetup=%%i")
+if not "%ReplaceStartMenuWithOpenShell%"=="0" (
+ echo start /w "" "%%ProgramFiles%%\%OpenShellSetup%" /qn ADDLOCAL=StartMenu>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
+ echo rd /s /q "%%ProgramData%%\Microsoft\Windows\Start Menu\Programs\Open-Shell" ^>nul 2^>^&^1>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
+ echo del /q /f "%%ProgramFiles%%\%OpenShellSetup%" ^>nul 2^>^&^1>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
+)
 echo rd /s /q "%%windir%%\Setup\Scripts" ^>nul 2^>^&^1>>"%~dp0mount\Windows\Setup\Scripts\SetupComplete.cmd"
 
 REM User Setup for each new user, re-apply some  settings which otherwise aren't honored when set in default user registry node
@@ -959,9 +1218,9 @@ echo net stop DmEnrollmentSvc /y ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cm
 if not "%EnableStore%"=="0" echo sc config UsoSvc start= demand ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
 if %EnableStore% GEQ 2 (
  echo reg add "HKLM\SOFTWARE\Policies\Microsoft\MicrosoftAccount" /v "DisableUserAuth" /t REG_DWORD /d 0 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
- echo reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v "NoConnectedUser" /t REG_DWORD /d 1 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+ echo reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v "NoConnectedUser" /t REG_DWORD /d 0 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
  echo reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowYourAccount" /v "value" /t REG_DWORD /d 1 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
- echo reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowWorkplace" /v "value" /t REG_DWORD /d 0 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+ echo reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowWorkplace" /v "value" /t REG_DWORD /d 1 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
  echo reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowSignInOptions" /v "value" /t REG_DWORD /d 1 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
 )
 REM Disable F1 to get help
@@ -971,6 +1230,29 @@ REM Disable keyboard switching key combination
 echo reg add "HKCU\Keyboard Layout\Toggle" /v "Language Hotkey" /t REG_SZ /d "3" /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
 echo reg add "HKCU\Keyboard Layout\Toggle" /v "Hotkey" /t REG_SZ /d "3" /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
 echo reg add "HKCU\Keyboard Layout\Toggle" /v "Layout Hotkey" /t REG_SZ /d "3" /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+REM Hide language bar
+echo reg add "HKCU\Software\Microsoft\CTF\LangBar" /v "ShowStatus" /t REG_DWORD /d 3 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+echo reg add "HKCU\Software\Microsoft\CTF\LangBar" /v "ExtraIconsOnMinimized" /t REG_DWORD /d 0 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+echo reg add "HKCU\Software\Microsoft\CTF\LangBar" /v "Label" /t REG_DWORD /d 1 /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+echo reg load HKLM\TK_NTUSER "%%SystemDrive%%\Users\Default\ntuser.dat" ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+echo reg delete "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Run" /v "UserSetup" /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+echo reg unload HKLM\TK_NTUSER ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+echo schtasks /Delete /TN "Microsoft\Windows\WindowsUpdate\Scheduled Start" /F ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+echo reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "UserSetup" /f ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+echo del /q /f "%%windir%%\UserSetup.cmd" ^>nul 2^>^&^1>>"%~dp0mount\Windows\UserSetup.cmd"
+reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "UserSetup" /t REG_EXPAND_SZ /d "%%SystemRoot%%\UserSetup.cmd" /f >nul
+
+
+
+REM Disable Push Notifications
+if %EnableStore% LEQ 3 ( 
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" /v "NoCloudApplicationNotification" /t REG_DWORD /d "1" /f >nul
+ Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" /v "NoTileApplicationNotification" /t REG_DWORD /d 1 /f >nul
+ Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\PushNotifications" /v "DisallowNotificationMirroring" /t REG_DWORD /d 1 /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsAccessNotifications" /t REG_DWORD /d "2" /f >nul
+ set "DisableUWPpermissions=%DisableUWPpermissions%,userNotificationListener"
+ set "DisableServices=%DisableServices%,WpnService"
+)
 
 REM Use classic notifications
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\Explorer" /v "EnableLegacyBalloonNotifications" /t REG_DWORD /d 1 /f >nul
@@ -1018,17 +1300,51 @@ Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings" /v "IsAADCloudSearchEnabled" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings" /v "IsDeviceSearchHistoryEnabled" /t REG_DWORD /d 0 /f >nul
 
+REM Hide Side folders in explorer
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders\{F5FB2C77-0E2F-4A16-A381-3E560C68BC83}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{088e3905-0323-4b02-9826-5d99428e115f}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{1CF1260C-4DD0-4ebb-811F-33C572699FDE}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{24ad3ad4-a569-4530-98e1-ab02f9417aa8}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{374DE290-123F-4565-9164-39C4925E467B}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{3ADD1653-EB32-4cb0-BBD7-DFA0ABB5ACCA}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{A0953C92-50DC-43bf-BE83-3742FED03C9C}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{A8CDFF1C-4878-43be-B5FD-F8091C1C60D0}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{d3162b92-9365-467a-956b-92703aca08af}" /f >nul 2>&1
+reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a}" /f >nul 2>&1
+if "%ImageArchitecture%"=="x64" (
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders\{F5FB2C77-0E2F-4A16-A381-3E560C68BC83}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{088e3905-0323-4b02-9826-5d99428e115f}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{1CF1260C-4DD0-4ebb-811F-33C572699FDE}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{24ad3ad4-a569-4530-98e1-ab02f9417aa8}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{374DE290-123F-4565-9164-39C4925E467B}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{3ADD1653-EB32-4cb0-BBD7-DFA0ABB5ACCA}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{A0953C92-50DC-43bf-BE83-3742FED03C9C}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{A8CDFF1C-4878-43be-B5FD-F8091C1C60D0}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{d3162b92-9365-467a-956b-92703aca08af}" /f >nul 2>&1
+ reg delete "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a}" /f >nul 2>&1
+)
+
+REM Hide frequent folders and recent files in Quick Access
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" /v "ShowFrequent" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" /v "ShowRecent" /t REG_DWORD /d 0 /f >nul
+
 
 REM User Privacy Policies
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement" /v "ScoobeSystemSettingEnabled" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "PublishUserActivities" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "UploadUserActivities" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "EnableActivityFeed" /t REG_DWORD /d "0" /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "AllowClipboardHistory" /t REG_DWORD /d "1" /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "AllowCrossDeviceClipboard" /t REG_DWORD /d "1" /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "AllowClipboardHistory" /t REG_DWORD /d "0" /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "AllowCrossDeviceClipboard" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Clipboard" /v "CloudClipboardAutomaticUpload" /t REG_DWORD /d 0 /f >nul
-Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Clipboard" /v "EnableClipboardHistory" /t REG_DWORD /d 1 /f >nul
-Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Clipboard" /v "EnableCloudClipboard" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Clipboard" /v "EnableClipboardHistory" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Clipboard" /v "EnableCloudClipboard" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo" /v "Enabled" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo" /v "DisabledByGroupPolicy" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_NTUSER\Control Panel\International\User Profile" /v "HttpAcceptLanguageOptOut" /t REG_DWORD /d 1 /f >nul
@@ -1052,13 +1368,15 @@ Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\Explorer" /v "Disabl
 Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "NoRecentDocsHistory" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "NoRecentDocsHistory" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "ClearRecentDocsOnExit" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "NoInstrumentation" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "NoResolveTrack" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "NoResolveSearch" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v "Start_AccountNotifications" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v "Start_TrackProgs" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v "Start_TrackDocs" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "AllowOnlineTips" /t REG_DWORD /d 0 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\NewsAndInterests\AllowNewsAndInterests" /v "value" /t REG_DWORD /d 1 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Dsh" /v "AllowNewsAndInterests" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\NewsAndInterests\AllowNewsAndInterests" /v "value" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Dsh" /v "AllowNewsAndInterests" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "EnableAppUriHandlers" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\StorageHealth" /v "AllowDiskHealthModelUpdates" /t REG_DWORD /d 0 /f >nul
 
@@ -1078,16 +1396,20 @@ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows NT\CurrentVersion\Software 
 rem Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\EventViewer" /v "MicrosoftEventVwrDisableLinks" /t REG_DWORD /d 1 /f >nul
 
 REM Disable Voice Activation
-Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Speech_OneCore\Settings\VoiceActivation\UserPreferenceForAllApps" /v "AgentActivationEnabled" /t REG_DWORD /d 0 /f >nul
-Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Speech_OneCore\Settings\VoiceActivation\UserPreferenceForAllApps" /v "AgentActivationOnLockScreenEnabled" /t REG_DWORD /d 0 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsActivateWithVoice" /t REG_DWORD /d 2 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsActivateWithVoiceAboveLock" /t REG_DWORD /d 2 /f >nul
+if %EnableStore% LEQ 3 ( 
+ Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Speech_OneCore\Settings\VoiceActivation\UserPreferenceForAllApps" /v "AgentActivationEnabled" /t REG_DWORD /d 0 /f >nul
+ Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Speech_OneCore\Settings\VoiceActivation\UserPreferenceForAllApps" /v "AgentActivationOnLockScreenEnabled" /t REG_DWORD /d 0 /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsActivateWithVoice" /t REG_DWORD /d 2 /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsActivateWithVoiceAboveLock" /t REG_DWORD /d 2 /f >nul
+)
 
 REM Disable Background UWP Apps
-Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" /v "GlobalUserDisabled" /t REG_DWORD /d 1 /f >nul
-Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v "BackgroundAppGlobalToggle" /t REG_DWORD /d 0 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsRunInBackground" /t REG_DWORD /d 2 /f >nul
-
+if %EnableStore% LEQ 3 ( 
+ Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" /v "GlobalUserDisabled" /t REG_DWORD /d 1 /f >nul
+ Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v "BackgroundAppGlobalToggle" /t REG_DWORD /d 0 /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsRunInBackground" /t REG_DWORD /d 2 /f >nul
+ Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications\Microsoft.Windows.CloudExperienceHost_cw5n1h2txyewy" /v "Disabled" /t REG_DWORD /d 1 /f >nul
+)
 
 REM Privacy Restrictions for UWP apps
 if %EnableStore% LEQ 3 (
@@ -1107,7 +1429,6 @@ if %EnableStore% LEQ 2 (
  rem Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsAccessTrustedDevices" /t REG_DWORD /d 2 /f >nul
 )
 if %EnableStore% LEQ 1 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsAccessAccountInfo" /t REG_DWORD /d 2 /f >nul
-if "%EnableStore%"=="0" Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" /v "LetAppsAccessAccountInfo" /t REG_DWORD /d 0 /f >nul
 
 
 REM Disable Autoupdate Offline Maps Data
@@ -1135,9 +1456,14 @@ reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\CDP" /v NearSh
 reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\CDP" /v CdpSessionUserAuthzPolicy /t REG_DWORD /d 0 /f >nul
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "EnableCdp" /t REG_DWORD /d 0 /f >nul
 
+REM Disable blured logon image
+reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "DisableAcrylicBackgroundOnLogon" /t REG_DWORD /d 1 /f >nul
+
 
 REM Disable File History
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\FileHistory" /v "Disabled" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "DisallowCpl" /t REG_DWORD /d "1" /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\DisallowCpl" /v "1" /t REG_SZ /d "Microsoft.FileHistory" /f >nul
 set "DisableServices=%DisableServices%,fhsvc"
 set RemoveTasks=%RemoveTasks%,"FileHistory\File History (maintenance mode)"
 
@@ -1151,6 +1477,12 @@ if "%EnableStore%"=="0" (
 )
  reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\WindowsStore" /v "AutoDownload" /t REG_DWORD /d 2 /f >nul
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Explorer" /v "NoUseStoreOpenWith" /t REG_DWORD /d 1 /f >nul
+
+REM Disable System Restore
+reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore" /v "DisableSR" /t REG_DWORD /d 1 /f >nul
+reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore" /v "DisableConfig" /t REG_DWORD /d 1 /f >nul
+set RemoveTasks=%RemoveTasks%,"SystemRestore\SR"
+reg add "HKLM\TK_SYSTEM\ControlSet001\Services\swprv" /v "Start" /t REG_DWORD /d "3" /f >nul
 
 REM Disable Storage Sense
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\StorageSense" /v "AllowStorageSenseGlobal" /t REG_DWORD /d 0 /f >nul
@@ -1168,7 +1500,7 @@ reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR" /v "A
 reg add "HKLM\TK_NTUSER\System\GameConfigStore" /v "GameDVR_Enabled" /t REG_DWORD /d 0 /f >nul
 reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\GameBar" /v "ShowGameModeNotifications" /t REG_DWORD /d 0 /f >nul
 reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\GameBar" /v "AutoGameModeEnabled" /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\GameBar" /v "ShowStartupPanel" /t REG_DWORD /d 1 /f >nul
+reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\GameBar" /v "ShowStartupPanel" /t REG_DWORD /d 0 /f >nul
 reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\GameBar" /v "UseNexusForGameBarEnabled" /t REG_DWORD /d 0 /f >nul
 reg query "HKLM\TK_SOFTWARE\Microsoft\WindowsRuntime\ActivatableClassId" /e /k /f "Windows.Gaming.GameBar.PresenceServer.Internal.PresenceWriter" >nul 2>&1 && "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait reg add "HKLM\TK_SOFTWARE\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.GameBar.PresenceServer.Internal.PresenceWriter" /v "ActivationType" /t REG_DWORD /d 0 /f >nul
 reg query "HKLM\TK_SOFTWARE\Microsoft\WindowsRuntime\ActivatableClassId" /e /k /f "Windows.Gaming.GameBar.PresenceServer.Internal.PresenceWriter" >nul 2>&1 && "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait reg add "HKLM\TK_SOFTWARE\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Gaming.GameBar.PresenceServer.Internal.PresenceWriter" /v "ActivationType" /t REG_DWORD /d 0 /f >nul
@@ -1181,11 +1513,14 @@ REM Remove Xbox Task
 
 REM Disable Windows Search online features
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "AllowCortana" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\Experience\AllowCortana" /v "value" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "AllowCortanaAboveLock" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "AllowCloudSearch" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "AllowSearchToUseLocation" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "AllowCortanaInAAD" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "AllowCortanaInAADPathOOBE" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "ConnectedSearchPrivacy" /t REG_DWORD /d 3 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "ConnectedSearchSafeSearch" /t REG_DWORD /d 3 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "ConnectedSearchUseWeb" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "ConnectedSearchUseWebOverMeteredConnections" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "DisableWebSearch" /t REG_DWORD /d 1 /f >nul
@@ -1195,8 +1530,17 @@ Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\Explorer" /v "Disabl
  REM Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v "BingSearchEnabled" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\Explorer" /v "NoRemoteDestinations" /t REG_DWORD /d 1 /f >nul
 
+REM Disable Windows Search Bar
+if not "%DisableWindowsSearch%"=="0" Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v "SearchboxTaskbarMode" /t REG_DWORD /d 0 /f >nul
+
 REM Disable Font Streaming
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "EnableFontProviders" /t REG_DWORD /d 0 /f >nul
+
+REM Disable News and Interests
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Feeds" /v "EnableFeeds" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Feeds" /v "ShellFeedsTaskbarOpenOnHover" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Feeds" /v "ShellFeedsTaskbarViewMode" /t REG_DWORD /d 2 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Feeds" /v "ShellFeedsTaskbarContentUpdateMode" /t REG_DWORD /d 0 /f >nul
 
 REM Do not notify about new apps or frequently used apps
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Explorer" /v "NoNewAppAlert" /t REG_DWORD /d 1 /f >nul
@@ -1220,27 +1564,32 @@ Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advan
 REM Disable Meet Now
 Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "HideSCAMeetNow" /t REG_DWORD /d 1 /f >nul
 
-REM Disable Microsoft Account and non-password sign-in options
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\MicrosoftAccount" /v "DisableUserAuth" /t REG_DWORD /d 0 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v "NoConnectedUser" /t REG_DWORD /d 1 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowYourAccount" /v "value" /t REG_DWORD /d 1 /f >nul
+REM Disable Microsoft Account
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\MicrosoftAccount" /v "DisableUserAuth" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v "NoConnectedUser" /t REG_DWORD /d 3 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowWorkplace" /v "value" /t REG_DWORD /d 0 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowSignInOptions" /v "value" /t REG_DWORD /d 1 /f >nul
+
+REM Disable sign in options like PIN, password, etc. in Settings (you probably don't need this policy, so it is commented out)
+rem Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowSignInOptions" /v "value" /t REG_DWORD /d 0 /f >nul
+REM Disable Custom User Account Image (you probably don't need this policy, so it is commented out)
+rem Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\Settings\AllowYourAccount" /v "value" /t REG_DWORD /d 0 /f >nul
 
 REM Disable Windows Hello for Business
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\PassportForWork" /v "Enabled" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\PassportForWork" /v "DisablePostLogonProvisioning" /t REG_DWORD /d 0 /f >nul
 
 REM Disable and Remove OneDrive
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\OneDrive" /v "PreventNetworkTrafficPreUserSignIn" /t REG_DWORD /d 1 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v "DisableFileSync" /t REG_DWORD /d 1 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v "DisableFileSyncNGSC" /t REG_DWORD /d 1 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v "DisableMeteredNetworkFileSync" /t REG_DWORD /d 1 /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v "DisableLibrariesDefaultSaveToOneDrive" /t REG_DWORD /d 1 /f >nul
-reg delete "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v OneDriveSetup /f >nul 2>&1
-del /q /f "%~dp0mount\Users\Default\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\OneDrive.lnk" >nul 2>&1
-if exist "%~dp0mount\Windows\System32\OneDriveSetup.exe" "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait cmd /c "del /q /f "%~dp0mount\Windows\System32\OneDriveSetup.exe"" >nul 2>&1
-if exist "%~dp0mount\Windows\SysWOW64\OneDriveSetup.exe" "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait cmd /c "del /q /f "%~dp0mount\Windows\SysWOW64\OneDriveSetup.exe"" >nul 2>&1
+if "%EnableOneDrive%"=="0" (
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\OneDrive" /v "PreventNetworkTrafficPreUserSignIn" /t REG_DWORD /d 1 /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v "DisableFileSync" /t REG_DWORD /d 1 /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v "DisableFileSyncNGSC" /t REG_DWORD /d 1 /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v "DisableMeteredNetworkFileSync" /t REG_DWORD /d 1 /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\OneDrive" /v "DisableLibrariesDefaultSaveToOneDrive" /t REG_DWORD /d 1 /f >nul
+ reg delete "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v OneDriveSetup /f >nul 2>&1
+ del /q /f "%~dp0mount\Users\Default\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\OneDrive.lnk" >nul 2>&1
+ if exist "%~dp0mount\Windows\System32\OneDriveSetup.exe" "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait cmd /c "del /q /f "%~dp0mount\Windows\System32\OneDriveSetup.exe"" >nul 2>&1
+ if exist "%~dp0mount\Windows\SysWOW64\OneDriveSetup.exe" "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait cmd /c "del /q /f "%~dp0mount\Windows\SysWOW64\OneDriveSetup.exe"" >nul 2>&1
+)
 
 REM Disable Location and Sensors
 if %EnableStore% LEQ 3 ( 
@@ -1257,8 +1606,16 @@ REM Disable Find My Device
 Reg add "HKLM\TK_SOFTWARE\Microsoft\MdmCommon\SettingValues" /v "LocationSyncEnabled" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\FindMyDevice" /v "AllowFindMyDevice" /t REG_DWORD /d 0 /f >nul
 
+REM Disable Action Center
+Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\ImmersiveShell" /v "UseActionCenterExperience" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v "HideSCAHealth" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\Explorer" /v "DisableNotificationCenter" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_NTUSER\SOFTWARE\Policies\Microsoft\Windows\Explorer" /v "NoBalloonFeatureAdvertisements" /t REG_DWORD /d 1 /f >nul
+rem Reg add "HKLM\TK_SYSTEM\ControlSet001\Services\wscsvc" /v "Start" /t REG_DWORD /d "4" /f >nul
+rem "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait cmd /c "del /q /f "%~dp0mount\Windows\SystemApps\ShellExperienceHost_cw5n1h2txyewy\Windows.UI.ActionCenter.dll"" >nul 2>&1
+
 REM Show All TaskBar Icons
-Reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer" /v "EnableAutoTray" /t REG_DWORD /d 1 /f >nul
+Reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer" /v "EnableAutoTray" /t REG_DWORD /d 0 /f >nul
 
 REM Disable and pre-remove Edge, SetupComplete.cmd remove the rest
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\MicrosoftEdge\Main" /v "AllowPrelaunch" /t REG_DWORD /d "0" /f >nul
@@ -1283,9 +1640,16 @@ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "DisableO
 Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\OSUpgrade" /v "AllowOSUpgrade" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SYSTEM\Setup\UpgradeNotification" /v "UpgradeAvailable" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\WindowsStore" /v "DisableOSUpgrade" /t REG_DWORD /d "1" /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "ProductVersion" /t REG_SZ /d "Windows 10" /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "TargetReleaseVersion" /t REG_DWORD /d "1" /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "TargetReleaseVersionInfo" /t REG_SZ /d "22H2" /f >nul
+if "%IsLTSC%"=="0" (
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "ProductVersion" /t REG_SZ /d "Windows 10" /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "TargetReleaseVersion" /t REG_DWORD /d "1" /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "TargetReleaseVersionInfo" /t REG_SZ /d "22H2" /f >nul
+)
+if not "%IsLTSC%"=="0" (
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "ProductVersion" /t REG_SZ /d "Windows 10" /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "TargetReleaseVersion" /t REG_DWORD /d "1" /f >nul
+ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v "TargetReleaseVersionInfo" /t REG_SZ /d "21H2" /f >nul
+)
 
 REM Windows Update Tweaks
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" /v "IncludeRecommendedUpdates" /t REG_DWORD /d "0" /f >nul
@@ -1338,10 +1702,12 @@ Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender Security Center\Notificatio
 Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender Security Center\Notifications" /v "DisableEnhancedNotifications" /t REG_DWORD /d "1" /f >nul
 "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender" /v "DisableAntiSpyware" /t REG_DWORD /d "1" /f >nul
 "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender" /v "DisableAntiVirus" /t REG_DWORD /d "1" /f >nul
+"%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender\Features" /v "TamperProtection" /t REG_DWORD /d "4" /f >nul
 "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender\Features" /v "TamperProtectionSource" /t REG_DWORD /d "2" /f >nul
+"%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender\Features" /v "SenseDevMode" /t REG_DWORD /d "0" /f >nul
 "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender\Signature Updates" /v "FirstAuGracePeriod" /t REG_DWORD /d "0" /f >nul
 "%~dp0tools\%HostArchitecture%\NSudo.exe" -U:T -P:E -UseCurrentConsole -Wait Reg add "HKLM\TK_SOFTWARE\Microsoft\Windows Defender\UX Configuration" /v "DisablePrivacyMode" /t REG_DWORD /d "1" /f >nul
-Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Systray" /v "HideSystray" /t REG_DWORD /d "0" /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Systray" /v "HideSystray" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender" /v "DisableAntiSpyware" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender" /v "PUAProtection" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender" /v "RandomizeScheduleTaskTimes" /t REG_DWORD /d "0" /f >nul
@@ -1355,6 +1721,7 @@ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Reporting" /v "Cri
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Reporting" /v "DisableEnhancedNotifications" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Reporting" /v "DisableGenericRePorts" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Reporting" /v "NonCriticalTimeOut" /t REG_DWORD /d 0 /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Reporting" /v "WppTracingLevel" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Scan" /v "AvgCPULoadFactor" /t REG_DWORD /d "10" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Scan" /v "DisableArchiveScanning" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Scan" /v "DisableCatchupFullScan" /t REG_DWORD /d "1" /f >nul
@@ -1368,6 +1735,7 @@ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Scan" /v "ScanOnly
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Scan" /v "ScanParameters" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Signature Updates" /v "DisableUpdateOnStartupWithoutEngine" /t REG_DWORD /d 1 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Signature Updates" /v "ForceUpdateFromMU" /t REG_DWORD /d 0 /f >nul
+reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\Network Protection" /v "EnableNetworkProtection" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SYSTEM\ControlSet001\Services\EventLog\System\Microsoft-Antimalware-ShieldProvider" /v "Start" /t REG_DWORD /d "4" /f >nul
 Reg add "HKLM\TK_SYSTEM\ControlSet001\Services\EventLog\System\WinDefend" /v "Start" /t REG_DWORD /d "4" /f >nul
 
@@ -1387,6 +1755,7 @@ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protecti
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v "DisableIOAVProtection" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v "DisableOnAccessProtection" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v "DisableRealtimeMonitoring" /t REG_DWORD /d "1" /f >nul
+Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v "LocalSettingOverrideDisableRealtimeMonitoring" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v "DisableRoutinelyTakingAction" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v "DisableScanOnRealtimeEnable" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v "DisableScriptScanning" /t REG_DWORD /d "1" /f >nul
@@ -1414,6 +1783,9 @@ REM Account Protection will always be disabled
 Reg add "HKLM\TK_DEFAULT\SOFTWARE\Microsoft\Windows Security Health\State" /v "AccountProtection_MicrosoftAccount_Disconnected" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows Security Health\State" /v "AccountProtection_MicrosoftAccount_Disconnected" /t REG_DWORD /d "0" /f >nul
 
+REM Remove Security Health system tray Icon
+Reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v SecurityHealth /f >nul 2>&1
+
 REM SmartScreen will be always disabled
 Reg add "HKLM\TK_DEFAULT\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost" /v "EnableWebContentEvaluation" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_DEFAULT\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost" /v "PreventOverride" /t REG_DWORD /d 0 /f >nul
@@ -1429,6 +1801,7 @@ Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Internet Explorer\PhishingFilter" /
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\MicrosoftEdge\PhishingFilter" /v "EnabledV9" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\MicrosoftEdge\PhishingFilter" /v "PreventOverride" /t REG_DWORD /d 0 /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\System" /v "EnableSmartScreen" /t REG_DWORD /d "0" /f >nul
+Reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\Browser\AllowSmartScreen" /v "value" /t REG_DWORD /d "0" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\SmartScreen" /v "ConfigureAppInstallControlEnabled" /t REG_DWORD /d "1" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows Defender\SmartScreen" /v "ConfigureAppInstallControl" /t REG_SZ /d "Anywhere" /f >nul
 Reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\0" /v "2301" /t REG_DWORD /d "3" /f >nul
@@ -1467,6 +1840,11 @@ REM Disable keyboard switching key combination
 reg add "HKLM\TK_NTUSER\Keyboard Layout\Toggle" /v "Language Hotkey" /t REG_SZ /d "3" /f >nul
 reg add "HKLM\TK_NTUSER\Keyboard Layout\Toggle" /v "Hotkey" /t REG_SZ /d "3" /f >nul
 reg add "HKLM\TK_NTUSER\Keyboard Layout\Toggle" /v "Layout Hotkey" /t REG_SZ /d "3" /f >nul
+
+REM Hide language bar
+reg add "HKLM\TK_NTUSER\Software\Microsoft\CTF\LangBar" /v "ShowStatus" /t REG_DWORD /d 3 /f >nul
+reg add "HKLM\TK_NTUSER\Software\Microsoft\CTF\LangBar" /v "ExtraIconsOnMinimized" /t REG_DWORD /d 0 /f >nul
+reg add "HKLM\TK_NTUSER\Software\Microsoft\CTF\LangBar" /v "Label" /t REG_DWORD /d 1 /f >nul
 
 REM Media Player Tweaks
 reg add "HKLM\TK_NTUSER\Software\Microsoft\MediaPlayer\Preferences" /v "AcceptedPrivacyStatement" /t REG_DWORD /d 1 /f >nul
@@ -1522,7 +1900,7 @@ reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Internet Setti
 reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\WinTrust\Trust Providers\Software Publishing" /v "State" /t REG_DWORD /d 0x23e00 /f >nul
  
 REM Disable AutoSuggest in Explorer address bar
-reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoComplete" /v "AutoSuggest " /t REG_SZ /d "no" /f >nul
+reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoComplete" /v "AutoSuggest" /t REG_SZ /d "no" /f >nul
 reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoComplete" /v "Append Completion" /t REG_SZ /d "no" /f >nul
 reg add "HKLM\TK_NTUSER\Software\Microsoft\Internet Explorer\AutoComplete" /v "Append Completion" /t REG_SZ /d "no" /f >nul
 
@@ -1625,6 +2003,9 @@ set "DisableServices=%DisableServices%,wcncsvc"
 REM Disable Hotspot Authentication
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\HotspotAuthentication" /v "Enabled" /t REG_DWORD /d "0" /f >nul
 
+REM Disable WiFi Sense - needed only for 1709 and prior
+rem reg add "HKLM\TK_SOFTWARE\Microsoft\WcmSvc\wifinetworkmanager\config" /v "AutoConnectAllowedOEM" /t REG_DWORD /d "0" /f >nul
+
 REM Disable LLTD protocol
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\LLTD" /v "EnableLLTDIO" /t REG_DWORD /d "0" /f >nul
 reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\LLTD" /v "EnableRspndr" /t REG_DWORD /d "0" /f >nul
@@ -1698,6 +2079,7 @@ if not "%DisableSearchIndexing%"=="0" (
  reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "PreventIndexingOfflineFiles" /t REG_DWORD /d 1 /f >nul
  reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "PreventIndexingOutlook" /t REG_DWORD /d 1 /f >nul
  reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v "PreventIndexingPublicFolders" /t REG_DWORD /d 1 /f >nul
+ reg add "HKLM\TK_NTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\DisallowCpl" /v "2" /t REG_SZ /d "Microsoft.IndexingOptions" /f >nul
  REM Below line is removed due to issues with Bluetooth pairing via Settings
  REM set "DisableServices=%DisableServices%,CDPSvc,CDPUserSvc,NcbService"
 )
@@ -1802,6 +2184,14 @@ reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Micro
 reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-Security-SPP-UX-Notifications/ActionCenter" /v "Enabled" /t REG_DWORD /d 0 /f >nul
 set RemoveTasks=%RemoveTasks%,"SoftwareProtectionPlatform\SvcRestartTask","SoftwareProtectionPlatform\SvcRestartTaskLogon","SoftwareProtectionPlatform\SvcRestartTaskNetwork"
 
+REM Disable Performance Counters
+if not "%DisablePerfCounters%"=="0" (
+ reg delete "HKLM\TK_SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib\_V2Providers" /f >nul 2>&1
+ reg add "HKLM\TK_SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib" /v "DebugTraceLevel" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib" /v "Disable" /t REG_DWORD /d 1 /f >nul
+ reg add "HKLM\TK_SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib" /v "Disable Performance Counters" /t REG_DWORD /d 1 /f >nul
+ reg add "HKLM\TK_SOFTWARE\Microsoft\Windows NT\CurrentVersion\Perflib" /v "EventLogLevel" /t REG_DWORD /d 0 /f >nul
+)
 
 ECHO.
 ECHO.
@@ -1928,6 +2318,7 @@ if not "%DisableInternetConnectionChecking%"=="0" (
  reg add "HKLM\TK_SYSTEM\ControlSet001\Services\NlaSvc\Parameters\Internet" /v "EnableActiveProbing" /t REG_DWORD /d 0 /f >nul
  reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\NetworkConnectivityStatusIndicator" /v "NoActiveProbe" /t REG_DWORD /d 1 /f >nul
  reg add "HKLM\TK_SOFTWARE\Policies\Microsoft\Windows\Network Connections" /v "NC_DoNotShowLocalOnlyIcon" /t REG_DWORD /d 1 /f >nul
+ reg add "HKLM\TK_SOFTWARE\Microsoft\PolicyManager\default\Connectivity\DisallowNetworkConnectivityActiveTests" /v "value" /t REG_DWORD /d "1" /f >nul
 )
 
 REM Disable "Shortcut" word when creating shortcuts
@@ -2115,34 +2506,36 @@ reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\Roaming\OpenWith\FileExts\.wd
 reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\Roaming\OpenWith\FileExts\.wdp\UserChoice" /v "ProgId" /t REG_SZ /d "PhotoViewer.FileAssoc.Wdp" /f >nul
 
 REM Enable classic Win32 Calculator
-reg add "HKLM\TK_SOFTWARE\RegisteredApplications" /v "Windows Calculator" /t REG_SZ /d "SOFTWARE\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /f >nul
-reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /v "ApplicationName" /t REG_EXPAND_SZ /d "@%%SystemRoot%%\system32\win32calc.exe" /f >nul
-reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /v "ApplicationDescription" /t REG_EXPAND_SZ /d "@%%SystemRoot%%\system32\win32calc.exe,-217" /f >nul
-reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities\URLAssociations" /v "calculator" /t REG_SZ /d "calculator" /f >nul
+if "%IsLTSC%"=="0" (
+ reg add "HKLM\TK_SOFTWARE\RegisteredApplications" /v "Windows Calculator" /t REG_SZ /d "SOFTWARE\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /f >nul
+ reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /v "ApplicationName" /t REG_EXPAND_SZ /d "@%%SystemRoot%%\system32\win32calc.exe" /f >nul
+ reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /v "ApplicationDescription" /t REG_EXPAND_SZ /d "@%%SystemRoot%%\system32\win32calc.exe,-217" /f >nul
+ reg add "HKLM\TK_SOFTWARE\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities\URLAssociations" /v "calculator" /t REG_SZ /d "calculator" /f >nul
 
-if exist "%~dp0mount\Windows\SysWOW64" (
- reg add "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /v "ApplicationName" /t REG_EXPAND_SZ /d "@%%SystemRoot%%\system32\win32calc.exe" /f >nul
- reg add "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /v "ApplicationDescription" /t REG_EXPAND_SZ /d "@%%SystemRoot%%\system32\win32calc.exe,-217" /f >nul
- reg add "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities\URLAssociations" /v "calculator" /t REG_SZ /d "calculator" /f >nul
+ if exist "%~dp0mount\Windows\SysWOW64" (
+  reg add "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /v "ApplicationName" /t REG_EXPAND_SZ /d "@%%SystemRoot%%\system32\win32calc.exe" /f >nul
+  reg add "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities" /v "ApplicationDescription" /t REG_EXPAND_SZ /d "@%%SystemRoot%%\system32\win32calc.exe,-217" /f >nul
+  reg add "HKLM\TK_SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Applets\Calculator\Capabilities\URLAssociations" /v "calculator" /t REG_SZ /d "calculator" /f >nul
  
- copy /b /y "%~dp0hotfixes\win32calc\x64\win32calc.exe" "%~dp0mount\Windows\System32" >nul
- copy /b /y "%~dp0hotfixes\win32calc\x86\win32calc.exe" "%~dp0mount\Windows\SysWOW64" >nul
- for %%l in (ar-SA,bg-BG,cs-CZ,da-DK,de-DE,el-GR,en-GB,en-US,es-ES,es-MX,et-EE,fi-FI,fr-CA,fr-FR,he-IL,hr-HR,hu-HU,it-IT,ja-JP,ko-KR,lt-LT,lv-LV,nb-NO,nl-NL,pl-PL,pt-BR,pt-PT,ro-RO,ru-RU,sk-SK,sl-SI,sr-Latn-RS,sv-SE,th-TH,tr-TR,uk-UA,zh-CN,zh-TW) do (
-  if exist "%~dp0mount\Windows\System32\%%l\winver.exe.mui" copy /b /y "%~dp0hotfixes\win32calc\MUI\%%l\x64\win32calc.exe.mui" "%~dp0mount\Windows\System32\%%l" >nul
-  if exist "%~dp0mount\Windows\SysWOW64\%%l\winver.exe.mui" copy /b /y "%~dp0hotfixes\win32calc\MUI\%%l\x86\win32calc.exe.mui" "%~dp0mount\Windows\SysWOW64\%%l" >nul
+  copy /b /y "%~dp0hotfixes\win32calc\x64\win32calc.exe" "%~dp0mount\Windows\System32" >nul
+  copy /b /y "%~dp0hotfixes\win32calc\x86\win32calc.exe" "%~dp0mount\Windows\SysWOW64" >nul
+  for %%l in (ar-SA,bg-BG,cs-CZ,da-DK,de-DE,el-GR,en-GB,en-US,es-ES,es-MX,et-EE,fi-FI,fr-CA,fr-FR,he-IL,hr-HR,hu-HU,it-IT,ja-JP,ko-KR,lt-LT,lv-LV,nb-NO,nl-NL,pl-PL,pt-BR,pt-PT,ro-RO,ru-RU,sk-SK,sl-SI,sr-Latn-RS,sv-SE,th-TH,tr-TR,uk-UA,zh-CN,zh-TW) do (
+   if exist "%~dp0mount\Windows\System32\%%l\winver.exe.mui" copy /b /y "%~dp0hotfixes\win32calc\MUI\%%l\x64\win32calc.exe.mui" "%~dp0mount\Windows\System32\%%l" >nul
+   if exist "%~dp0mount\Windows\SysWOW64\%%l\winver.exe.mui" copy /b /y "%~dp0hotfixes\win32calc\MUI\%%l\x86\win32calc.exe.mui" "%~dp0mount\Windows\SysWOW64\%%l" >nul
+  )
  )
-)
 
-if not exist "%~dp0mount\Windows\SysWOW64" (
- copy /b /y "%~dp0hotfixes\win32calc\x86\win32calc.exe" "%~dp0mount\Windows\System32" >nul
- for %%l in (ar-SA,bg-BG,cs-CZ,da-DK,de-DE,el-GR,en-GB,en-US,es-ES,es-MX,et-EE,fi-FI,fr-CA,fr-FR,he-IL,hr-HR,hu-HU,it-IT,ja-JP,ko-KR,lt-LT,lv-LV,nb-NO,nl-NL,pl-PL,pt-BR,pt-PT,ro-RO,ru-RU,sk-SK,sl-SI,sr-Latn-RS,sv-SE,th-TH,tr-TR,uk-UA,zh-CN,zh-TW) do (
-  if exist "%~dp0mount\Windows\System32\%%l\winver.exe.mui" copy /b /y "%~dp0hotfixes\win32calc\MUI\%%l\x86\win32calc.exe.mui" "%~dp0mount\Windows\System32\%%l" >nul
+ if not exist "%~dp0mount\Windows\SysWOW64" (
+  copy /b /y "%~dp0hotfixes\win32calc\x86\win32calc.exe" "%~dp0mount\Windows\System32" >nul
+  for %%l in (ar-SA,bg-BG,cs-CZ,da-DK,de-DE,el-GR,en-GB,en-US,es-ES,es-MX,et-EE,fi-FI,fr-CA,fr-FR,he-IL,hr-HR,hu-HU,it-IT,ja-JP,ko-KR,lt-LT,lv-LV,nb-NO,nl-NL,pl-PL,pt-BR,pt-PT,ro-RO,ru-RU,sk-SK,sl-SI,sr-Latn-RS,sv-SE,th-TH,tr-TR,uk-UA,zh-CN,zh-TW) do (
+   if exist "%~dp0mount\Windows\System32\%%l\winver.exe.mui" copy /b /y "%~dp0hotfixes\win32calc\MUI\%%l\x86\win32calc.exe.mui" "%~dp0mount\Windows\System32\%%l" >nul
+  )
  )
+ copy /b /y "%~dp0hotfixes\win32calc\Calculator.lnk" "%~dp0mount\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories" >nul
+ attrib -r -s -h "%~dp0mount\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories\desktop.ini" >nul
+ copy /b /y "%~dp0hotfixes\accessories.ini" "%~dp0mount\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories\desktop.ini" >nul
+ attrib +a +s +h "%~dp0mount\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories\desktop.ini" >nul
 )
-copy /b /y "%~dp0hotfixes\win32calc\Calculator.lnk" "%~dp0mount\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories" >nul
-attrib -r -s -h "%~dp0mount\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories\desktop.ini" >nul
-copy /b /y "%~dp0hotfixes\accessories.ini" "%~dp0mount\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories\desktop.ini" >nul
-attrib +a +s +h "%~dp0mount\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories\desktop.ini" >nul
 
 REM Enable support for classic HLP Help files
 if "%AddWinHlp%"=="0" goto skipWinHlpSupport
@@ -2171,6 +2564,15 @@ reg add "HKLM\TK_SOFTWARE\Classes\hlpfile\DefaultIcon" /ve /t REG_EXPAND_SZ /d "
 reg add "HKLM\TK_SOFTWARE\Classes\hlpfile\shell\open\command" /ve /t REG_EXPAND_SZ /d "%%SystemRoot%%\winhlp32.exe %%1" /f >nul
 
 :skipWinHlpSupport
+
+REM Explorer Patcher settings for classic clock, volume control, battery control, network connections and no auto-updates
+reg add "HKLM\TK_NTUSER\Software\ExplorerPatcher" /v "UpdatePolicy" /t REG_DWORD /d 2 /f >nul
+reg add "HKLM\TK_NTUSER\Software\ExplorerPatcher" /v "EnableSymbolDownload" /t REG_DWORD /d 1 /f >nul
+reg add "HKLM\TK_NTUSER\Software\ExplorerPatcher" /v "ReplaceNetwork" /t REG_DWORD /d 2 /f >nul
+reg add "HKLM\TK_NTUSER\Software\ExplorerPatcher" /v "NoPropertiesInContextMenu" /t REG_DWORD /d 1 /f >nul
+reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows NT\CurrentVersion\MTCUVC" /v "EnableMtcUvc" /t REG_DWORD /d 0 /f >nul
+reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\ImmersiveShell" /v "UseWin32TrayClockExperience" /t REG_DWORD /d 1 /f >nul
+reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\ImmersiveShell" /v "UseWin32BatteryFlyout" /t REG_DWORD /d 1 /f >nul
 
 REM Microsoft SysInternals Tools EULA is Accepted by default
 reg add "HKLM\TK_NTUSER\Software\Sysinternals\AutoRuns" /v "EulaAccepted" /t REG_DWORD /d 1 /f >nul
@@ -2218,6 +2620,48 @@ REM Copy NSudo utility to Program Files
 mkdir "%~dp0mount\Program Files\NSudo" >nul 2>&1
 copy /b /y "%~dp0tools\%PackagesArchitecture%\NSudo.exe" "%~dp0mount\Program Files\NSudo" >nul
 copy /b /y "%~dp0tools\%PackagesArchitecture%\NSudoG.exe" "%~dp0mount\Program Files\NSudo" >nul
+
+REM Copy OpenShell installer to Program Files and set up its default configuration
+if not "%ReplaceStartMenuWithOpenShell%"=="0" (
+ copy /b /y "%~dp0hotfixes\%OpenShellSetup%" "%~dp0mount\Program Files" >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu" /v "ShowedStyle2" /t REG_DWORD /d 1 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "Version" /t REG_DWORD /d 0x40400be /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SkipMetro" /t REG_DWORD /d 1 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "MainMenuAnimate" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "StartScreenShortcut" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "MenuStyle" /t REG_SZ /d "Win7" /f >nul
+ if "%OpenShellLooksLikeWin7%"=="0" reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SkinW7" /t REG_SZ /d "Metro" /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SkinVariationW7" /t REG_SZ /d "" /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SkinOptionsW7" /t REG_MULTI_SZ /d USER_IMAGE=1\0SMALL_ICONS=0\0LARGE_FONT=0\0ICON_FRAMES=1\0OPAQUE=0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "EnableExit" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "HighlightNew" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "BoldSettings" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "RecentPrograms" /t REG_SZ /d "Recent" /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SearchTrack" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SearchPath" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SearchKeywords" /t REG_DWORD /d 0 /f >nul
+ if not "%DisableSearchIndexing%"=="0" reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SearchFiles" /t REG_DWORD /d 0 /f >nul
+ if "%DisableSearchIndexing%"=="0" reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SearchFiles" /t REG_DWORD /d 1 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SearchInternet" /t REG_DWORD /d 0 /f >nul
+ reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "MenuItems7" /t REG_MULTI_SZ /d Item1.Command=user_files\0Item1.Settings=NOEXPAND\0Item2.Command=user_documents\0Item2.Settings=NOEXPAND\0Item3.Command=user_pictures\0Item3.Settings=NOEXPAND\0Item4.Command=user_music\0Item4.Settings=NOEXPAND\0Item5.Command=user_videos\0Item5.Settings=ITEM_DISABLED\0Item6.Command=downloads\0Item6.Settings=ITEM_DISABLED\0Item7.Command=homegroup\0Item7.Settings=ITEM_DISABLED\0Item8.Command=separator\0Item9.Command=games\0Item9.Settings=TRACK_RECENT^|NOEXPAND^|ITEM_DISABLED\0Item10.Command=favorites\0Item10.Settings=ITEM_DISABLED\0Item11.Command=recent_documents\0Item11.Settings=ITEM_DISABLED\0Item12.Command=computer\0Item12.Settings=NOEXPAND\0Item13.Command=network\0Item13.Settings=ITEM_DISABLED\0Item14.Command=network_connections\0Item14.Settings=ITEM_DISABLED\0Item15.Command=separator\0Item16.Command=pc_settings\0Item16.Settings=TRACK_RECENT\0Item17.Command=control_panel\0Item17.Settings=TRACK_RECENT^|NOEXPAND\0Item18.Command=admin\0Item18.Settings=TRACK_RECENT^|ITEM_DISABLED\0Item19.Command=devices\0Item19.Settings=NOEXPAND\0Item20.Command=defaults\0Item21.Command=help\0Item21.Settings=ITEM_DISABLED\0Item22.Command=run\0Item23.Command=apps\0Item23.Settings=ITEM_DISABLED\0Item24.Command=windows_security /f >nul
+ if not "%OpenShellLooksLikeWin7%"=="0" (
+  mkdir "%~dp0mount\Program Files\Open-Shell\Skins" >nul 2>&1
+  copy /b /y "%~dp0hotfixes\Win7skin\Taskbar7.png" "%~dp0mount\Program Files\Open-Shell" >nul
+  copy /b /y "%~dp0hotfixes\Win7skin\Start_Button7.png" "%~dp0mount\Program Files\Open-Shell" >nul
+  copy /b /y "%~dp0hotfixes\Win7skin\Windows 7.skin7" "%~dp0mount\Program Files\Open-Shell\Skins" >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "SkinW7" /t REG_SZ /d "Windows 7" /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "CustomTaskbar" /t REG_DWORD /d 1 /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "TaskbarLook" /t REG_SZ /d "Transparent" /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "TaskbarOpacity" /t REG_DWORD /d 100 /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "TaskbarColor" /t REG_DWORD /d 0xff8000 /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "TaskbarTexture" /t REG_SZ /d "%%SystemDrive%%\Program Files\Open-Shell\Taskbar7.png" /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "EnableStartButton" /t REG_DWORD /d 1 /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "StartButtonType" /t REG_SZ /d "CustomButton" /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "StartButtonPath" /t REG_SZ /d "%%SystemDrive%%\Program Files\Open-Shell\Start_Button7.png" /f >nul
+  reg add "HKLM\TK_NTUSER\Software\OpenShell\StartMenu\Settings" /v "StartButtonAlign" /t REG_DWORD /d 0 /f >nul
+  reg add "HKLM\TK_NTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v "ShowTaskViewButton" /t REG_DWORD /d 0 /f >nul
+ )
+)
 
 REM Create ngen.cmd for compiling .NET Framework
 echo @ECHO OFF>"%~dp0mount\Windows\ngen.cmd"
